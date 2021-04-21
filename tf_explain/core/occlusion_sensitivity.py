@@ -9,7 +9,7 @@ import cv2
 from tf_explain.utils.display import grid_display, heatmap_display
 from tf_explain.utils.image import apply_grey_patch
 from tf_explain.utils.saver import save_rgb
-
+from tqdm import tqdm
 
 class OcclusionSensitivity:
 
@@ -49,7 +49,7 @@ class OcclusionSensitivity:
                 for image in images
             ]
         )
-
+        print(f"Sensitivity map 0: {sensitivity_maps[0]}")
         heatmaps = np.array(
             [
                 heatmap_display(heatmap, image, colormap)
@@ -57,6 +57,7 @@ class OcclusionSensitivity:
             ]
         )
 
+        print(f"Heatmap 0: {heatmaps[0]}")
         grid = grid_display(heatmaps)
 
         return grid
@@ -81,12 +82,6 @@ class OcclusionSensitivity:
             )
         )
 
-        patches = [
-            apply_grey_patch(image, top_left_x, top_left_y, patch_size)
-            for index_x, top_left_x in enumerate(range(0, image.shape[0], patch_size))
-            for index_y, top_left_y in enumerate(range(0, image.shape[1], patch_size))
-        ]
-
         coordinates = [
             (index_y, index_x)
             for index_x in range(
@@ -97,15 +92,22 @@ class OcclusionSensitivity:
             )
         ]
 
-        predictions = model.predict(np.array(patches), batch_size=self.batch_size)
-        target_class_predictions = [
-            prediction[class_index] for prediction in predictions
-        ]
+        target_class_predictions = []
+        base_confidence = model.predict(np.array([image]), batch_size=1)[0][class_index]
+        print(f"Base_confidence: {base_confidence}")
+        with tqdm(total=math.ceil(image.shape[0] * image.shape[1] / patch_size ** 2),position=0,leave=True) as pbar:
+            for index_y, top_left_y in enumerate(range(0, image.shape[1], patch_size)):
+                for index_x, top_left_x in enumerate(range(0, image.shape[0], patch_size)):
+                    patch = np.array([apply_grey_patch(image, top_left_x, top_left_y, patch_size)])
+                    prediction = model.predict(patch, batch_size=1)[0][class_index]
+                    target_class_predictions.append(prediction)
+                    triggered = pbar.update(1)
 
+        print(f"Confidence scores: {target_class_predictions}")
         for (index_y, index_x), confidence in zip(
             coordinates, target_class_predictions
         ):
-            sensitivity_map[index_y, index_x] = 1 - confidence
+            sensitivity_map[index_y, index_x] = base_confidence - confidence
 
         return cv2.resize(sensitivity_map, image.shape[0:2])
 
